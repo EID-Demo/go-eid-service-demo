@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 )
 
 func main() {
+	// 读取配置文件
 	viper.SetConfigFile("config.toml")
 	if err := viper.ReadInConfig(); err != nil {
 		panic(err)
@@ -29,11 +31,13 @@ func main() {
 		fmt.Printf("%s = %s\n", key, value)
 	}
 	fmt.Println("服务启动...")
+	// 启动服务
 	err := http.ListenAndServe(viper.GetString("port"), nil)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 }
+
 func Decode(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("\n\n------------------------------------------")
 	requestID := r.PostFormValue("request_id")
@@ -43,20 +47,35 @@ func Decode(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Printf("收到请求[request_id: %s]\n", requestID)
 
+	// 组装请求参数
 	data := url.Values{}
 	factor := RandString(8)
 	data.Add("app_id", viper.GetString("app_id"))
 	data.Add("request_id", requestID)
 	data.Add("encrypt_factor", factor)
 
-	preSign := "app_id=" + viper.GetString("app_id") + "&encrypt_factor=" + factor + "&request_id=" + requestID + viper.GetString("app_key")
+	// 签名
+	// 1. 对 key 进行排序
+	keys := make([]string, 0)
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	// 2. 组装待签名字符串
+	preSign := ""
+	for _, key := range keys {
+		preSign += fmt.Sprintf("%s=%s&", key, data[key][0])
+	}
+	preSign = preSign[:len(preSign)-1] + viper.GetString("app_key")
 	fmt.Printf("待签名字符串[%s]\n", preSign)
+	// 3. 计算签名
 	m := md5.New()
 	m.Write([]byte(preSign))
 	sign := hex.EncodeToString(m.Sum(nil))
 	sign = strings.ToUpper(sign)
 	data.Add("sign", sign)
 
+	// 请求云解码 openAPI
 	info, err := RequestDecode(data)
 	if err != nil {
 		fmt.Printf("请求失败[%s]\n", err)
@@ -81,6 +100,7 @@ func Decode(w http.ResponseWriter, r *http.Request) {
 
 	infoData := subData["info"].(string)
 
+	// 解码身份证信息
 	temp, err := base64.StdEncoding.DecodeString(infoData)
 	infoStr, err := DesDecryptECB(string(temp), factor)
 	if err != nil {
@@ -130,6 +150,7 @@ const (
 	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
 
+// 生成 n 位随机字符串
 func RandString(n int) string {
 	rand.Seed(time.Now().UTC().UnixNano())
 	b := make([]byte, n)
@@ -147,6 +168,7 @@ func RandString(n int) string {
 	return string(b)
 }
 
+// des 解码
 func DesDecryptECB(msg string, key string) (string, error) {
 	crypted := []byte(msg)
 	block, err := des.NewCipher([]byte(key))
