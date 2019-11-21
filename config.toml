@@ -1,0 +1,7 @@
+port = ":8000"
+router = "/eid/decode" # 访问路由
+
+server = "https://openapi.sunmi.com/v1/eid/decode" # release
+
+app_id = "请填入商米分配的 app_id"
+app_key = "请输入商米分配的 app_key"
